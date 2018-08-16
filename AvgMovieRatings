@@ -1,0 +1,101 @@
+package edu.wm.jemills
+
+import org.apache.spark._
+import org.apache.spark.SparkContext._
+import org.apache.log4j._
+import scala.io.Source
+import java.nio.charset.CodingErrorAction
+import scala.io.Codec
+import org.apache.spark.sql._
+import org.apache.spark.sql.functions._
+import java.io._
+
+/** Find the average movies ratings only of movies rated at least 100 times */
+object DF_Movie_Rating {
+  
+    case class Movie(UserID:Int, MovieID:Int, Rating:Int, Number:Int)
+  
+  def mapper(line:String): Movie = {
+    val fields = line.split("\t")  
+    
+    val movie:Movie = Movie(fields(0).toInt, fields(1).toInt, fields(2).toInt, fields(3).toInt)
+    return movie
+  }
+    
+    
+  
+  /** Load up a Map of movie IDs to movie names. */
+  def loadMovieNames() : Map[Int, String] = {
+    
+    // Handle character encoding issues:
+    implicit val codec = Codec("UTF-8")
+    codec.onMalformedInput(CodingErrorAction.REPLACE)
+    codec.onUnmappableCharacter(CodingErrorAction.REPLACE)
+    
+    // Create a Map of Ints to Strings, and populate it from u.item.
+    var movieNames:Map[Int, String] = Map()
+    
+     val lines = Source.fromFile("../ml-100k/u.item").getLines()
+     for (line <- lines) {
+       var fields = line.split('|')
+       if (fields.length > 1) {
+        movieNames += (fields(0).toInt -> fields(1))
+       }
+     }    
+     return movieNames
+  }
+ 
+  /** Our main function where the action happens */
+  def main(args: Array[String]) {
+   
+    // Set the log level to only print errors
+    Logger.getLogger("org").setLevel(Level.ERROR)
+    
+     // Create a SparkContext using every core of the local machine
+    val sc = new SparkContext("local[*]", "HWAverageMovieRatings") with Serializable
+    
+     // Use new SparkSession interface in Spark 2.0
+    val spark = SparkSession
+      .builder
+      .appName("SparkSQL")
+      .master("local[*]")
+      .config("spark.sql.warehouse.dir", "file:///C:/temp") // Necessary to work around a Windows bug in Spark 2.0.0; omit if you're not on Windows.
+      .getOrCreate()
+    
+    // Convert our csv file to a DataSet, using our Movie case
+    // class to infer the schema.
+    import spark.implicits._
+    val lines = spark.sparkContext.textFile("../ml-100k/u.data")
+    val MovieDF = lines.map(mapper).toDS().cache()
+    
+    // Create a broadcast variable of our ID -> movie name map
+    var nameDict = sc.broadcast(loadMovieNames)
+    
+    MovieDF.groupBy("MovieID").agg(avg("Rating"), count("MovieID"))
+    val MoviesManyRatings = MovieDF.groupBy("MovieID").agg(mean("Rating").alias("avgRating"), count("MovieID").alias("cnt"))
+    .filter($"cnt" >= 100)
+    .orderBy(("avgRating")).coalesce(1)
+    
+    // Load up the movie ID -> name map
+     val names = loadMovieNames()
+    
+      for (result <- MoviesManyRatings) {
+     println (names(result(0).asInstanceOf[Int]) + ": " + result(1))
+    }
+    
+    val results = MoviesManyRatings.collect()
+    
+    val file = "AverageMovieRatings.txt"    
+    val writer = new BufferedWriter(new OutputStreamWriter(new FileOutputStream(file)))
+    for (result <- results) {
+        writer.write(names(result(0).asInstanceOf[Int]) + ": " + result(1) + "\n")
+                    }
+    writer.close()    
+
+    // Stop the session
+    spark.stop()
+    
+
+  }  
+}
+
