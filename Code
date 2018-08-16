@@ -12,7 +12,6 @@ import java.io._
 
 /** Find the average movies ratings only of movies rated at least 100 times */
 object DF_Movie_Rating {
-  
     case class Movie(UserID:Int, MovieID:Int, Rating:Int, Number:Int)
   
   def mapper(line:String): Movie = {
@@ -21,7 +20,6 @@ object DF_Movie_Rating {
     val movie:Movie = Movie(fields(0).toInt, fields(1).toInt, fields(2).toInt, fields(3).toInt)
     return movie
   }
-    
     
   
   /** Load up a Map of movie IDs to movie names. */
@@ -65,22 +63,22 @@ object DF_Movie_Rating {
     // Convert our csv file to a DataSet, using our Movie case
     // class to infer the schema.
     import spark.implicits._
-    val lines = spark.sparkContext.textFile("../ml-100k/u.data")
+    val lines = spark.sparkContext.textFile("../ml-100k/u.data") #accessing movie data
     val MovieDF = lines.map(mapper).toDS().cache()
     
     // Create a broadcast variable of our ID -> movie name map
     var nameDict = sc.broadcast(loadMovieNames)
     
-    MovieDF.groupBy("MovieID").agg(avg("Rating"), count("MovieID"))
+    MovieDF.groupBy("MovieID").agg(avg("Rating"), count("MovieID")) #finding avg. rating and count of movie id for each movie
     val MoviesManyRatings = MovieDF.groupBy("MovieID").agg(mean("Rating").alias("avgRating"), count("MovieID").alias("cnt"))
     .filter($"cnt" >= 100)
-    .orderBy(("avgRating")).coalesce(1)
+    .orderBy(("avgRating")).coalesce(1) #make sure there are more than 100 ratings
     
     // Load up the movie ID -> name map
-     val names = loadMovieNames()
+     val names = loadMovieNames() #from the other file
     
       for (result <- MoviesManyRatings) {
-     println (names(result(0).asInstanceOf[Int]) + ": " + result(1))
+     println (names(result(0).asInstanceOf[Int]) + ": " + result(1)) #movieID, followed by result
     }
     
     val results = MoviesManyRatings.collect()
